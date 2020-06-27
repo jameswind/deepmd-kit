@@ -4,6 +4,7 @@ import time
 import shutil
 import numpy as np
 from deepmd.env import tf
+from deepmd.env import default_tf_session_config
 from deepmd.RunOptions import global_tf_float_precision
 from deepmd.RunOptions import global_ener_float_precision
 from deepmd.Fitting import EnerFitting, WFCFitting, PolarFittingLocFrame, PolarFittingSeA, GlobalPolarFittingSeA, DipoleFittingSeA
@@ -27,6 +28,7 @@ import deepmd._prod_force_se_r_grad
 import deepmd._prod_virial_se_r_grad
 import deepmd._soft_min_force_grad
 import deepmd._soft_min_virial_grad
+import deepmd._gelu
 
 from deepmd.common import j_must_have, ClassArg
 
@@ -177,7 +179,8 @@ class NNPTrainer (object):
                   .add('timing_in_training',  bool, default = True)\
                   .add('profiling',     bool,   default = False)\
                   .add('profiling_file',str,    default = 'timeline.json')\
-                  .add('sys_weights',   list    )
+                  .add('sys_probs',   list    )\
+                  .add('auto_prob_style', str, default = "prob_sys_size")
         tr_data = tr_args.parse(training_param)
         self.numb_test = tr_data['numb_test']
         self.disp_file = tr_data['disp_file']
@@ -188,7 +191,8 @@ class NNPTrainer (object):
         self.timing_in_training  = tr_data['timing_in_training']
         self.profiling = tr_data['profiling']
         self.profiling_file = tr_data['profiling_file']
-        self.sys_weights = tr_data['sys_weights']        
+        self.sys_probs = tr_data['sys_probs']        
+        self.auto_prob_style = tr_data['auto_prob_style']        
         self.useBN = False
         if fitting_type == 'ener' and  self.fitting.get_numb_fparam() > 0 :
             self.numb_fparam = self.fitting.get_numb_fparam()
@@ -288,10 +292,7 @@ class NNPTrainer (object):
         self._message("built training")
 
     def _init_sess_serial(self) :
-        self.sess = tf.Session(
-            config=tf.ConfigProto(intra_op_parallelism_threads=self.run_opt.num_intra_threads, 
-                                  inter_op_parallelism_threads=self.run_opt.num_inter_threads
-            ))
+        self.sess = tf.Session(config=default_tf_session_config)
         self.saver = tf.train.Saver()
         saver = self.saver
         if self.run_opt.init_mode == 'init_from_scratch' :
@@ -393,7 +394,9 @@ class NNPTrainer (object):
 
         train_time = 0
         while cur_batch < stop_batch :
-            batch_data = data.get_batch (sys_weights = self.sys_weights)
+            batch_data = data.get_batch (sys_probs = self.sys_probs,
+                                         auto_prob_style = self.auto_prob_style
+            )
             feed_dict_batch = {}
             for kk in batch_data.keys():
                 if kk == 'find_type' or kk == 'type' :

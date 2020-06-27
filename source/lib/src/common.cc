@@ -159,7 +159,7 @@ get_env_nthreads(int & num_intra_nthreads,
 {
   num_intra_nthreads = 0;
   num_inter_nthreads = 0;
-  const char* env_intra_nthreads = std::getenv("OMP_NUM_THREADS");
+  const char* env_intra_nthreads = std::getenv("TF_INTRA_OP_PARALLELISM_THREADS");
   const char* env_inter_nthreads = std::getenv("TF_INTER_OP_PARALLELISM_THREADS");
   if (env_intra_nthreads && 
       string(env_intra_nthreads) != string("") && 
@@ -479,9 +479,6 @@ session_input_tensors (
     const int                           *   ilist, 
     const int                           *   jrange,
     const int                           *   jlist,
-    int                                 *   array_int,
-    unsigned long long                  *   array_longlong, 
-    double                              *   array_double,
     const vector<VALUETYPE>	            &   fparam_,
     const vector<VALUETYPE>	            &   aparam_,
     const NNPAtomMap<VALUETYPE>         &   nnpmap,
@@ -511,7 +508,7 @@ session_input_tensors (
     box_shape.AddDim (nframes);
     box_shape.AddDim (9);
     TensorShape mesh_shape;
-    mesh_shape.AddDim (32);
+    mesh_shape.AddDim (16);
     TensorShape natoms_shape;
     natoms_shape.AddDim (2 + ntypes);
     TensorShape fparam_shape;
@@ -565,7 +562,7 @@ session_input_tensors (
         }
     }
     
-    for (int ii = 0; ii < 32; ++ii) mesh(ii) = 0;
+    for (int ii = 0; ii < 16; ++ii) mesh(ii) = 0;
     
     mesh (0) = sizeof(int *) / sizeof(int);
     assert (mesh(0) * sizeof(int) == sizeof(int *));
@@ -577,9 +574,6 @@ session_input_tensors (
     memcpy (&mesh(4), &(ilist), sizeof(int *));
     memcpy (&mesh(8), &(jrange), sizeof(int *));
     memcpy (&mesh(12), &(jlist), sizeof(int *));
-    memcpy (&mesh(16), &(array_int), sizeof(int *));
-    memcpy (&mesh(20), &(array_longlong), sizeof(unsigned long long *));
-    memcpy (&mesh(24), &(array_double), sizeof(double *));
 
     natoms (0) = nloc;
     natoms (1) = nall;
