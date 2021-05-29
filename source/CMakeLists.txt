@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.7)
 project(DeePMD)
+if (CMAKE_COMPILER_IS_GNU)
+  set(CMAKE_LINK_WHAT_YOU_USE TRUE)
+endif ()
 
 # build cpp or python interfaces
 if (NOT DEFINED BUILD_CPP_IF) 
@@ -47,6 +50,9 @@ set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wno-ignored-attributes")
 
 # find tensorflow, I need tf abi info
 find_package(tensorflow REQUIRED)
+
+# find threads
+find_package(Threads)
 
 # auto op_cxx_abi
 if (NOT DEFINED OP_CXX_ABI)
@@ -121,7 +127,7 @@ else()
   endif()
 endif()
 if (USE_CUDA_TOOLKIT)
-  add_definitions("-DUSE_CUDA_TOOLKIT")
+  add_definitions("-D GOOGLE_CUDA")
 endif()
 
 # define USE_TTM
@@ -132,6 +138,16 @@ if (USE_TTM)
   message(STATUS "Use TTM")
   set(TTM_DEF "-DUSE_TTM")
 endif (USE_TTM)
+
+# old pppm interface
+if(NOT DEFINED OLD_LMP_PPPM)
+  set(OLD_LMP_PPPM FALSE)
+endif(NOT DEFINED OLD_LMP_PPPM)
+if (OLD_LMP_PPPM)
+  set(OLD_LMP_PPPM_DEF "-DOLD_LMP_PPPM")
+  message(STATUS "Use old lammps pppm interface")
+endif()
+add_definitions (${OLD_LMP_PPPM_DEF})
 
 # define build type
 if ((NOT DEFINED CMAKE_BUILD_TYPE) OR CMAKE_BUILD_TYPE STREQUAL "")
@@ -172,8 +188,8 @@ if (BUILD_CPP_IF)
   set (LIB_DEEPMD_OP		"deepmd_op")
   if (USE_CUDA_TOOLKIT)
     set (LIB_DEEPMD_OP_CUDA		"deepmd_op_cuda")
-  else()
-    set (LIB_DEEPMD_OP_CUDA		"")
+  else ()
+    set (LIB_DEEPMD_OP_CUDA		"deepmd_op")
   endif()
   if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 4.9)
     set (LIB_DEEPMD_NATIVE	"deepmd_native_md")

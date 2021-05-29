@@ -15,6 +15,7 @@
 #include "neigh_request.h"
 #include "modify.h"
 #include "fix.h"
+#include "citeme.h"
 #ifdef USE_TTM
 #include "fix_ttm_mod.h"
 #endif
@@ -23,6 +24,22 @@
 
 using namespace LAMMPS_NS;
 using namespace std;
+
+static const char cite_user_deepmd_package[] =
+	"USER-DEEPMD package:\n\n"
+    "@article{Wang_ComputPhysCommun_2018_v228_p178,\n"
+    "  author = {Wang, Han and Zhang, Linfeng and Han, Jiequn and E, Weinan},\n"
+    "  doi = {10.1016/j.cpc.2018.03.016},\n"
+    "  url = {https://doi.org/10.1016/j.cpc.2018.03.016},\n"
+    "  year = 2018,\n"
+    "  month = {jul},\n"
+    "  publisher = {Elsevier {BV}},\n"
+    "  volume = 228,\n"
+    "  journal = {Comput. Phys. Commun.},\n"
+    "  title = {{DeePMD-kit: A deep learning package for many-body potential energy representation and molecular dynamics}},\n"
+    "  pages = {178--184}\n"
+	"}\n\n";
+
 
 static int stringCmp(const void *a, const void* b)
 {
@@ -185,9 +202,11 @@ PairNNP::PairNNP(LAMMPS *lmp)
     : Pair(lmp)
       
 {
+  if (lmp->citeme) lmp->citeme->add(cite_user_deepmd_package);
   if (strcmp(update->unit_style,"metal") != 0) {
     error->all(FLERR,"Pair deepmd requires metal unit, please set it by \"units metal\"");
   }
+  restartinfo = 1;
   pppmflag = 1;
   respa_enable = 0;
   writedata = 0;
@@ -203,6 +222,7 @@ PairNNP::PairNNP(LAMMPS *lmp)
   single_model = false;
   multi_models_mod_devi = false;
   multi_models_no_mod_devi = false;
+  is_restart = false;
   // set comm size needed by this Pair
   comm_reverse = 1;
 
@@ -463,10 +483,10 @@ void PairNNP::compute(int eflag, int vflag)
 	nnp_inter_model_devi.compute_avg (tmp_avg_f_, all_force_);  
 	nnp_inter_model_devi.compute_std_f (std_f_, tmp_avg_f_, all_force_);
 	std_f.resize(std_f_.size());
-	for (int dd = 0; dd < std_f_.size(); ++dd) std_f[dd] = std_f_[dd];
 	if (out_rel == 1){
 	    nnp_inter_model_devi.compute_relative_std_f (std_f_, tmp_avg_f_, eps);
 	}
+	for (int dd = 0; dd < std_f_.size(); ++dd) std_f[dd] = std_f_[dd];
 #endif
 	double min = numeric_limits<double>::max(), max = 0, avg = 0;
 	ana_st(max, min, avg, std_f, nlocal);
@@ -735,6 +755,7 @@ void PairNNP::settings(int narg, char **arg)
   
   if (comm->me == 0){
     if (numb_models > 1 && out_freq > 0){
+      if (!is_restart) {
       fp.open (out_file);
       fp << scientific;
       fp << "#"
@@ -746,6 +767,10 @@ void PairNNP::settings(int narg, char **arg)
 	 << setw(18+1) << "min_devi_f"
 	 << setw(18+1) << "avg_devi_f"
 	 << endl;
+      } else {
+        fp.open (out_file, std::ofstream::out | std::ofstream::app);
+        fp << scientific;
+      }
     }
     string pre = "  ";
     cout << pre << ">>> Info of model(s):" << endl
@@ -781,6 +806,16 @@ void PairNNP::settings(int narg, char **arg)
   all_force.resize(numb_models);
 }
 
+void PairNNP::read_restart(FILE *)
+{
+  is_restart = true;
+}
+
+void PairNNP::write_restart(FILE *)
+{
+  // pass
+}
+
 /* ----------------------------------------------------------------------
    set coeffs for one or more type pairs
 ------------------------------------------------------------------------- */
@@ -798,8 +833,8 @@ void PairNNP::coeff(int narg, char **arg)
   ihi = n;
   jhi = n;
   if (narg == 2) {
-    force->bounds(FLERR,arg[0],atom->ntypes,ilo,ihi);
-    force->bounds(FLERR,arg[1],atom->ntypes,jlo,jhi);
+    utils::bounds(FLERR,arg[0],1,atom->ntypes,ilo,ihi,error);
+    utils::bounds(FLERR,arg[1],1,atom->ntypes,jlo,jhi,error);
     if (ilo != 1 || jlo != 1 || ihi != n || jhi != n) {
       error->all(FLERR,"deepmd requires that the scale should be set to all atom types, i.e. pair_coeff * *.");
     }

@@ -1,4 +1,4 @@
-import dpdata,os,sys,json
+import dpdata,os,sys
 import numpy as np
 import tensorflow as tf
 from common import Data
@@ -12,7 +12,7 @@ from deepmd.RunOptions import RunOptions
 from deepmd.DataSystem import DataSystem
 from deepmd.Model import NNPModel
 from deepmd.Model import LearingRate
-from deepmd.common import j_must_have, j_must_have_d, j_have
+from deepmd.common import j_must_have, j_loader
 
 def gen_data() :
     tmpdata = Data(rand_pert = 0.1, seed = 1)
@@ -32,8 +32,7 @@ def gen_data() :
     np.save('system/set.000/fparam.npy', tmpdata.fparam)
 
 def compute_efv(jfile):
-    fp = open (jfile, 'r')
-    jdata = json.load (fp)
+    jdata = j_loader(jfile)
     run_opt = RunOptions(None) 
     systems = j_must_have(jdata, 'systems')
     set_pfx = j_must_have(jdata, 'set_prefix')
@@ -41,7 +40,6 @@ def compute_efv(jfile):
     test_size = j_must_have(jdata, 'numb_test')
     batch_size = 1
     test_size = 1
-    stop_batch = j_must_have(jdata, 'stop_batch')
     rcut = j_must_have (jdata, 'rcut')
 
     data = DataSystem(systems, set_pfx, batch_size, test_size, rcut, run_opt)

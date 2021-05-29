@@ -1,10 +1,11 @@
-import os,sys,json
+import os,sys
 import numpy as np
 import unittest
 
 from collections import defaultdict
 from deepmd.DescrptSeA import DescrptSeA
 from deepmd.Fitting import EnerFitting
+from deepmd.common import j_loader
 
 input_json = 'water_se_a_afparam.json'
 
@@ -57,9 +58,8 @@ def _brute_aparam(data, ndim):
 
 class TestEnerFittingStat (unittest.TestCase) :
     def test (self) :
-        with open(input_json) as fp:
-            jdata = json.load(fp)
-            jdata = jdata['model']
+        jdata = j_loader(input_json)
+        jdata = jdata['model']
         descrpt = DescrptSeA(jdata['descriptor'])
         fitting = EnerFitting(jdata['fitting_net'], descrpt)
         avgs = [0, 10]
@@ -69,7 +69,7 @@ class TestEnerFittingStat (unittest.TestCase) :
         all_data = _make_fake_data(sys_natoms, sys_nframes, avgs, stds)
         frefa, frefs = _brute_fparam(all_data, len(avgs))
         arefa, arefs = _brute_aparam(all_data, len(avgs))
-        fitting.compute_dstats(all_data, protection = 1e-2)
+        fitting.compute_input_stats(all_data, protection = 1e-2)
         # print(frefa, frefs)
         for ii in range(len(avgs)):
             self.assertAlmostEqual(frefa[ii], fitting.fparam_avg[ii])

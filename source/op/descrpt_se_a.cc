@@ -12,50 +12,29 @@ typedef double compute_t;
 using namespace tensorflow;
 using namespace std;
 
-#ifdef HIGH_PREC
-typedef double VALUETYPE ;
-#else 
-typedef float  VALUETYPE ;
-#endif
+using CPUDevice = Eigen::ThreadPoolDevice;
+using GPUDevice = Eigen::GpuDevice;
 
-#ifdef HIGH_PREC
 REGISTER_OP("DescrptSeA")
-.Input("coord: double")
-.Input("type: int32")
-.Input("natoms: int32")
-.Input("box: double")
-.Input("mesh: int32")
-.Input("davg: double")
-.Input("dstd: double")
-.Attr("rcut_a: float")
-.Attr("rcut_r: float")
-.Attr("rcut_r_smth: float")
-.Attr("sel_a: list(int)")
-.Attr("sel_r: list(int)")
-.Output("descrpt: double")
-.Output("descrpt_deriv: double")
-.Output("rij: double")
-.Output("nlist: int32");
-#else
-REGISTER_OP("DescrptSeA")
-.Input("coord: float")
-.Input("type: int32")
-.Input("natoms: int32")
-.Input("box: float")
-.Input("mesh: int32")
-.Input("davg: float")
-.Input("dstd: float")
-.Attr("rcut_a: float")
-.Attr("rcut_r: float")
-.Attr("rcut_r_smth: float")
-.Attr("sel_a: list(int)")
-.Attr("sel_r: list(int)")
-.Output("descrpt: float")
-.Output("descrpt_deriv: float")
-.Output("rij: float")
-.Output("nlist: int32");
-#endif
+    .Attr("T: {float, double}")
+    .Input("coord: T")          //atomic coordinates
+    .Input("type: int32")       //atomic type
+    .Input("natoms: int32")     //local atomic number; each type atomic number; daizheyingxiangqude atomic numbers
+    .Input("box : T")
+    .Input("mesh : int32")
+    .Input("davg: T")           //average value of data
+    .Input("dstd: T")           //standard deviation
+    .Attr("rcut_a: float")      //no use
+    .Attr("rcut_r: float")
+    .Attr("rcut_r_smth: float")
+    .Attr("sel_a: list(int)")
+    .Attr("sel_r: list(int)")   //all zero
+    .Output("descrpt: T")
+    .Output("descrpt_deriv: T")
+    .Output("rij: T")
+    .Output("nlist: int32");
 
+template<typename Device, typename FPTYPE>
 class DescrptSeAOp : public OpKernel {
 public:
   explicit DescrptSeAOp(OpKernelConstruction* context) : OpKernel(context) {
@@ -119,14 +98,33 @@ public:
 
     int nei_mode = 0;
     if (mesh_tensor.shape().dim_size(0) == 16) {
+      // lammps neighbor list
       nei_mode = 3;
     }
     else if (mesh_tensor.shape().dim_size(0) == 12) {
+      // user provided extended mesh
       nei_mode = 2;
     }
     else if (mesh_tensor.shape().dim_size(0) == 6) {
+      // manual copied pbc
       assert (nloc == nall);
       nei_mode = 1;
+    }
+    else if (mesh_tensor.shape().dim_size(0) == 0) {
+      // no pbc
+      nei_mode = -1;
+    }
+    else {
+      throw runtime_error("invalid mesh tensor");
+    }
+    bool b_pbc = true;
+    // if region is given extended, do not use pbc
+    if (nei_mode >= 1 || nei_mode == -1) {
+      b_pbc = false;
+    }
+    bool b_norm_atom = false;
+    if (nei_mode == 1){
+      b_norm_atom = true;
     }
 
     // Create an output tensor
@@ -161,15 +159,15 @@ public:
 						     nlist_shape,
 						     &nlist_tensor));
     
-    auto coord	= coord_tensor	.matrix<VALUETYPE>();
+    auto coord	= coord_tensor	.matrix<FPTYPE>();
     auto type	= type_tensor	.matrix<int>();
-    auto box	= box_tensor	.matrix<VALUETYPE>();
+    auto box	= box_tensor	.matrix<FPTYPE>();
     auto mesh	= mesh_tensor	.flat<int>();
-    auto avg	= avg_tensor	.matrix<VALUETYPE>();
-    auto std	= std_tensor	.matrix<VALUETYPE>();
-    auto descrpt	= descrpt_tensor	->matrix<VALUETYPE>();
-    auto descrpt_deriv	= descrpt_deriv_tensor	->matrix<VALUETYPE>();
-    auto rij		= rij_tensor		->matrix<VALUETYPE>();
+    auto avg	= avg_tensor	.matrix<FPTYPE>();
+    auto std	= std_tensor	.matrix<FPTYPE>();
+    auto descrpt	= descrpt_tensor	->matrix<FPTYPE>();
+    auto descrpt_deriv	= descrpt_deriv_tensor	->matrix<FPTYPE>();
+    auto rij		= rij_tensor		->matrix<FPTYPE>();
     auto nlist		= nlist_tensor		->matrix<int>();
 
     // // check the types
@@ -196,7 +194,7 @@ public:
 	for (int dd = 0; dd < 3; ++dd){
 	  d_coord3[ii*3+dd] = coord(kk, ii*3+dd);
 	}
-	if (nei_mode <= 1){
+	if (b_norm_atom){
 	  compute_t inter[3];
 	  region.phys2Inter (inter, &d_coord3[3*ii]);
 	  for (int dd = 0; dd < 3; ++dd){
@@ -259,14 +257,11 @@ public:
 	}
 	::build_nlist (d_nlist_a, d_nlist_r, d_coord3, nloc, rcut_a, rcut_r, nat_stt, ncell, ext_stt, ext_end, region, ncell);
       }
-      else {
-	build_nlist (d_nlist_a, d_nlist_r, rcut_a, rcut_r, d_coord3, region);      
+      else if (nei_mode == -1){
+	::build_nlist (d_nlist_a, d_nlist_r, d_coord3, rcut_a, rcut_r, NULL);
       }
-
-      bool b_pbc = true;
-      // if region is given extended, do not use pbc
-      if (nei_mode >= 1) {
-	b_pbc = false;
+      else {
+	throw runtime_error("unknow neighbor mode");
       }
 
       // loop over atoms, compute descriptors for each atom
@@ -351,49 +346,12 @@ private:
       sec[ii] = sec[ii-1] + n_sel[ii-1];
     }
   }
-  void 
-  build_nlist (vector<vector<int > > & nlist0,
-	       vector<vector<int > > & nlist1,
-	       const compute_t & rc0_,
-	       const compute_t & rc1_,
-	       const vector<compute_t > & posi3,
-	       const SimulationRegion<compute_t > & region) const {
-    compute_t rc0 (rc0_);
-    compute_t rc1 (rc1_);
-    assert (rc0 <= rc1);
-    compute_t rc02 = rc0 * rc0;
-    // negative rc0 means not applying rc0
-    if (rc0 < 0) rc02 = 0;
-    compute_t rc12 = rc1 * rc1;
-
-    unsigned natoms = posi3.size()/3;
-    nlist0.clear();
-    nlist1.clear();
-    nlist0.resize(natoms);
-    nlist1.resize(natoms);
-    for (unsigned ii = 0; ii < natoms; ++ii){
-      nlist0[ii].reserve (60);
-      nlist1[ii].reserve (60);
-    }
-    for (unsigned ii = 0; ii < natoms; ++ii){
-      for (unsigned jj = ii+1; jj < natoms; ++jj){
-	compute_t diff[3];
-	region.diffNearestNeighbor (posi3[jj*3+0], posi3[jj*3+1], posi3[jj*3+2],
-				    posi3[ii*3+0], posi3[ii*3+1], posi3[ii*3+2],
-				    diff[0], diff[1], diff[2]);
-	compute_t r2 = MathUtilities::dot<compute_t> (diff, diff);
-	if (r2 < rc02) {
-	  nlist0[ii].push_back (jj);
-	  nlist0[jj].push_back (ii);
-	}
-	else if (r2 < rc12) {
-	  nlist1[ii].push_back (jj);
-	  nlist1[jj].push_back (ii);
-	}
-      }
-    }
-  }
 };
 
-REGISTER_KERNEL_BUILDER(Name("DescrptSeA").Device(DEVICE_CPU), DescrptSeAOp);
+#define REGISTER_CPU(T)                                                                 \
+REGISTER_KERNEL_BUILDER(                                                                \
+    Name("DescrptSeA").Device(DEVICE_CPU).TypeConstraint<T>("T"),                       \
+    DescrptSeAOp<CPUDevice, T>); 
+REGISTER_CPU(float);
+REGISTER_CPU(double);
 
